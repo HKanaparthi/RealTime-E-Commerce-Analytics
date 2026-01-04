@@ -1,0 +1,18 @@
+# ShopStream Spark Streaming Dockerfile
+
+
+FROM bitnami/spark:latest
+
+USER root
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Default command
+CMD ["python", "spark_streaming.py"]

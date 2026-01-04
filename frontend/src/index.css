@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100;
+  }
+}
+
+@layer components {
+  .metric-card {
+    @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6;
+  }
+
+  .metric-card-title {
+    @apply text-sm font-medium text-gray-500 dark:text-gray-400 mb-2;
+  }
+
+  .metric-card-value {
+    @apply text-3xl font-bold text-gray-900 dark:text-white;
+  }
+
+  .metric-card-change {
+    @apply text-sm font-medium mt-2;
+  }
+
+  .metric-card-change.positive {
+    @apply text-green-600 dark:text-green-400;
+  }
+
+  .metric-card-change.negative {
+    @apply text-red-600 dark:text-red-400;
+  }
+
+  .alert-badge {
+    @apply px-3 py-1 rounded-full text-xs font-medium;
+  }
+
+  .alert-badge.critical {
+    @apply bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300;
+  }
+
+  .alert-badge.warning {
+    @apply bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300;
+  }
+
+  .alert-badge.info {
+    @apply bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300;
+  }
+}

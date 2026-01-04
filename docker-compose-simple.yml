@@ -1,0 +1,183 @@
+# ShopStream Docker Compose - Simplified Version
+
+#
+# This version runs without Spark for easier local testing
+# Run: docker compose -f docker-compose-simple.yml up -d
+
+services:
+  # Zookeeper (required by Kafka)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: shopstream-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - shopstream-network
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: shopstream-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9093,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    networks:
+      - shopstream-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # TimescaleDB (PostgreSQL with TimescaleDB extension)
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: shopstream-timescaledb
+    environment:
+      POSTGRES_DB: shopstream
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+    networks:
+      - shopstream-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: shopstream-backend
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@timescaledb:5432/shopstream
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      FRONTEND_URL: http://localhost:5173
+      ENVIRONMENT: development
+      DEBUG: "true"
+    volumes:
+      - ./backend:/app
+    networks:
+      - shopstream-network
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo 'Waiting for Kafka and TimescaleDB...' &&
+        sleep 15 &&
+        echo 'Initializing database...' &&
+        python models.py &&
+        echo 'Starting FastAPI server...' &&
+        uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # Event Generator (Kafka Producer)
+  event-generator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: shopstream-event-generator
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      EVENT_RATE: 50
+    volumes:
+      - ./backend:/app
+    networks:
+      - shopstream-network
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo 'Waiting for Kafka...' &&
+        sleep 20 &&
+        echo 'Starting event generator...' &&
+        python kafka_producer.py --rate 50
+      "
+
+  # Kafka Consumer (writes events to database)
+  kafka-consumer:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: shopstream-kafka-consumer
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9093
+      DATABASE_URL: postgresql://postgres:postgres@timescaledb:5432/shopstream
+    volumes:
+      - ./backend:/app
+    networks:
+      - shopstream-network
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo 'Waiting for Kafka and TimescaleDB...' &&
+        sleep 25 &&
+        echo 'Starting Kafka consumer...' &&
+        python kafka_consumer.py
+      "
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: shopstream-frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - shopstream-network
+    restart: unless-stopped
+    command: npm run dev -- --host 0.0.0.0
+
+networks:
+  shopstream-network:
+    driver: bridge
+
+volumes:
+  timescale-data:
