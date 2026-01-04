@@ -32,23 +32,26 @@ class Settings(BaseSettings):
         os.getenv("FRONTEND_URL", ""),
     ]
 
-    # Kafka Configuration
-    KAFKA_BOOTSTRAP_SERVERS: str = os.getenv(
-        "KAFKA_BOOTSTRAP_SERVERS",
-        "localhost:9092"
-    )
+    # Kafka Configuration (Optional - for advanced setup)
+    # If not set, the app will use simple event generator (free tier)
+    KAFKA_BOOTSTRAP_SERVERS: Optional[str] = os.getenv("KAFKA_BOOTSTRAP_SERVERS", None)
     KAFKA_TOPIC: str = "ecommerce-events"
     KAFKA_CONSUMER_GROUP: str = "shopstream-processors"
     KAFKA_PARTITIONS: int = 3
     KAFKA_REPLICATION_FACTOR: int = 1
 
-    # Spark Configuration
+    # Spark Configuration (Optional - for advanced setup)
+    # If not set, the app will use database-based processing (free tier)
+    SPARK_MASTER: Optional[str] = os.getenv("SPARK_MASTER", None)
     SPARK_APP_NAME: str = "ShopStream-Processor"
-    SPARK_MASTER: str = os.getenv("SPARK_MASTER", "local[*]")
     SPARK_CHECKPOINT_DIR: str = os.getenv(
         "SPARK_CHECKPOINT_DIR",
         "/tmp/shopstream-checkpoints"
     )
+
+    # Deployment Mode
+    USE_KAFKA: bool = os.getenv("KAFKA_BOOTSTRAP_SERVERS") is not None
+    USE_SPARK: bool = os.getenv("SPARK_MASTER") is not None
 
     # TimescaleDB/PostgreSQL
     DATABASE_URL: str = os.getenv(
@@ -190,6 +193,9 @@ def get_database_url() -> str:
 
 def get_kafka_config() -> dict:
     """Get Kafka configuration dictionary"""
+    if not settings.KAFKA_BOOTSTRAP_SERVERS:
+        raise ValueError("Kafka is not configured. Set KAFKA_BOOTSTRAP_SERVERS environment variable.")
+
     return {
         "bootstrap_servers": settings.KAFKA_BOOTSTRAP_SERVERS.split(","),
         "topic": settings.KAFKA_TOPIC,
@@ -201,11 +207,14 @@ def get_kafka_config() -> dict:
 
 def get_spark_config() -> dict:
     """Get Spark configuration dictionary"""
+    if not settings.SPARK_MASTER:
+        raise ValueError("Spark is not configured. Set SPARK_MASTER environment variable.")
+
     return {
         "app_name": settings.SPARK_APP_NAME,
         "master": settings.SPARK_MASTER,
         "checkpoint_dir": settings.SPARK_CHECKPOINT_DIR,
-        "kafka_bootstrap_servers": settings.KAFKA_BOOTSTRAP_SERVERS,
+        "kafka_bootstrap_servers": settings.KAFKA_BOOTSTRAP_SERVERS or "",
         "kafka_topic": settings.KAFKA_TOPIC,
     }
 

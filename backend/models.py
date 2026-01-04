@@ -243,100 +243,112 @@ def get_session():
     return SessionLocal()
 
 
-def init_database():
+def init_database(use_timescale: bool = False):
     """
-    Initialize database with tables and TimescaleDB extensions
-    Run this once during deployment
+    Initialize database with tables and optional TimescaleDB extensions.
+
+    Args:
+        use_timescale: Enable TimescaleDB features (hypertables, retention policies)
+                      Set to False for free tier PostgreSQL (Neon, Supabase, etc.)
+
+    Run this once during deployment.
     """
     engine = get_engine()
+    timescale_enabled = False
 
-    # Enable TimescaleDB extension
-    with engine.connect() as conn:
-        try:
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
-            conn.commit()
-            print("✅ TimescaleDB extension enabled")
-        except Exception as e:
-            print(f"⚠️  Warning: Could not enable TimescaleDB extension: {e}")
-            print("    (This is normal if TimescaleDB is not installed)")
+    # Try to enable TimescaleDB extension if requested
+    if use_timescale:
+        with engine.connect() as conn:
+            try:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"))
+                conn.commit()
+                timescale_enabled = True
+                print("✅ TimescaleDB extension enabled")
+            except Exception as e:
+                print(f"⚠️  TimescaleDB not available: {e}")
+                print("    Falling back to standard PostgreSQL")
+                timescale_enabled = False
 
     # Create all tables
     Base.metadata.create_all(bind=engine)
     print("✅ Database tables created")
 
-    # Convert to hypertables (TimescaleDB)
-    with engine.connect() as conn:
-        try:
-            # events_raw hypertable
-            conn.execute(text("""
-                SELECT create_hypertable(
-                    'events_raw',
-                    'timestamp',
-                    if_not_exists => TRUE,
-                    chunk_time_interval => INTERVAL '1 day'
-                );
-            """))
+    # Convert to hypertables (TimescaleDB only)
+    if timescale_enabled:
+        with engine.connect() as conn:
+            try:
+                # events_raw hypertable
+                conn.execute(text("""
+                    SELECT create_hypertable(
+                        'events_raw',
+                        'timestamp',
+                        if_not_exists => TRUE,
+                        chunk_time_interval => INTERVAL '1 day'
+                    );
+                """))
 
-            # metrics_1min hypertable
-            conn.execute(text("""
-                SELECT create_hypertable(
-                    'metrics_1min',
-                    'time_bucket',
-                    if_not_exists => TRUE,
-                    chunk_time_interval => INTERVAL '1 day'
-                );
-            """))
+                # metrics_1min hypertable
+                conn.execute(text("""
+                    SELECT create_hypertable(
+                        'metrics_1min',
+                        'time_bucket',
+                        if_not_exists => TRUE,
+                        chunk_time_interval => INTERVAL '1 day'
+                    );
+                """))
 
-            # metrics_1hour hypertable
-            conn.execute(text("""
-                SELECT create_hypertable(
-                    'metrics_1hour',
-                    'time_bucket',
-                    if_not_exists => TRUE,
-                    chunk_time_interval => INTERVAL '7 days'
-                );
-            """))
+                # metrics_1hour hypertable
+                conn.execute(text("""
+                    SELECT create_hypertable(
+                        'metrics_1hour',
+                        'time_bucket',
+                        if_not_exists => TRUE,
+                        chunk_time_interval => INTERVAL '7 days'
+                    );
+                """))
 
-            conn.commit()
-            print("✅ TimescaleDB hypertables created")
-        except Exception as e:
-            print(f"⚠️  Warning: Could not create hypertables: {e}")
-            print("    (This is normal if TimescaleDB is not installed)")
+                conn.commit()
+                print("✅ TimescaleDB hypertables created")
+            except Exception as e:
+                print(f"⚠️  Could not create hypertables: {e}")
 
-    # Add data retention policies
-    with engine.connect() as conn:
-        try:
-            # Raw events: 30 days
-            conn.execute(text("""
-                SELECT add_retention_policy(
-                    'events_raw',
-                    INTERVAL '30 days',
-                    if_not_exists => TRUE
-                );
-            """))
+        # Add data retention policies
+        with engine.connect() as conn:
+            try:
+                # Raw events: 30 days
+                conn.execute(text("""
+                    SELECT add_retention_policy(
+                        'events_raw',
+                        INTERVAL '30 days',
+                        if_not_exists => TRUE
+                    );
+                """))
 
-            # 1-min metrics: 7 days
-            conn.execute(text("""
-                SELECT add_retention_policy(
-                    'metrics_1min',
-                    INTERVAL '7 days',
-                    if_not_exists => TRUE
-                );
-            """))
+                # 1-min metrics: 7 days
+                conn.execute(text("""
+                    SELECT add_retention_policy(
+                        'metrics_1min',
+                        INTERVAL '7 days',
+                        if_not_exists => TRUE
+                    );
+                """))
 
-            # 1-hour metrics: 365 days
-            conn.execute(text("""
-                SELECT add_retention_policy(
-                    'metrics_1hour',
-                    INTERVAL '365 days',
-                    if_not_exists => TRUE
-                );
-            """))
+                # 1-hour metrics: 365 days
+                conn.execute(text("""
+                    SELECT add_retention_policy(
+                        'metrics_1hour',
+                        INTERVAL '365 days',
+                        if_not_exists => TRUE
+                    );
+                """))
 
-            conn.commit()
-            print("✅ Data retention policies configured")
-        except Exception as e:
-            print(f"⚠️  Warning: Could not set retention policies: {e}")
+                conn.commit()
+                print("✅ Data retention policies configured")
+            except Exception as e:
+                print(f"⚠️  Could not set retention policies: {e}")
+    else:
+        print("ℹ️  Running with standard PostgreSQL (no TimescaleDB features)")
+        print("   Consider using Neon.tech or Supabase for free PostgreSQL hosting")
 
     print(f"🎉 Database initialization complete!")
 
